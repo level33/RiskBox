@@ -5,6 +5,11 @@
 *.so
 *.dylib
 
+*.prof
+*.test
+*.swp
+/bin/
+
 # Test binary, build with `go test -c`
 *.test
 
