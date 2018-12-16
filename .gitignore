@@ -9,6 +9,8 @@
 *.test
 *.swp
 /bin/
+/src/github.com/
+/src/golang.org/
 
 # Test binary, build with `go test -c`
 *.test
