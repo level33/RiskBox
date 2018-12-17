@@ -20,6 +20,12 @@ import (
 	"github.com/labstack/echo"
 )
 
+//Auxiliary function use to ched if a database is in ALL_DBS list
+func Contains(list []string, elem string) bool { 
+        for _, t := range list { if t == elem { return true } } 
+        return false 
+} 
+
 func GetMD5Hash(text []byte) string {
 	hash := md5.Sum(text)
 	return hex.EncodeToString(hash[:])
