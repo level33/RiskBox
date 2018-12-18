@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
-"path/filepath"
+    "path/filepath"
 	"github.com/Jeffail/gabs"
 	"github.com/labstack/echo"
+    "github.com/dop251/goja"
+    
 )
 
 type InputPayload struct {
@@ -27,8 +29,17 @@ var (
 
 // input GET Handler
 func inputGET(c echo.Context) error {
-	//TODO return a list with existing databases
-	return c.String(http.StatusOK, "Hello, World!")
+	// return a list with existing databases
+	localDB := NewBoltDB("", ALL_DBS[0] + ".bd")
+	defer localDB.Close()
+	inputDoc, _ := localDB.Read([]byte("payload"),[]byte("input"))
+	var doc map[string]interface{}
+    err := json.Unmarshal([]byte(inputDoc), &doc)
+    if (err != nil){
+        e.Logger.Error(e)
+    }
+	dbList := map[string]interface{}{"dblist" : ALL_DBS, "input": doc } 
+	return c.JSON(http.StatusOK, dbList)
 }
 
 // input POST Handler
@@ -70,12 +81,50 @@ func inputPOST(c echo.Context) error {
 	    e.Logger.Error(u.AccountName + " malformed database name!")
 	}	
 	
-	//TODO upsert document with payload
-	
-
 	return c.JSON(http.StatusCreated, u)
-
 }
+
+// compute GET handler
+func computeGET(c echo.Context) error{
+    localDB := NewBoltDB("", ALL_DBS[0] + ".bd")
+	defer localDB.Close()
+	inputDoc, _ := localDB.Read([]byte("payload"),[]byte("input"))
+	var doc map[string]interface{}
+    err := json.Unmarshal([]byte(inputDoc), &doc)
+    if (err != nil){
+        e.Logger.Error(e)
+    }
+    
+    e.Logger.Error(doc)
+    
+    vm := goja.New()
+    vm.Set("__input", map[string]interface{}(doc))
+    v, err := vm.RunString(` 
+        __input["result"] = [0, 2, 3];
+    `)
+    if err != nil {
+        panic(err)
+    }
+    num := v.Export().(map[string]interface{}) 
+    return c.JSON(http.StatusOK, num)
+}
+
+// compute POST handler
+func computePOST(c echo.Context) error{
+    
+    return c.String(http.StatusOK, "WIP!")
+}
+
+// output GET hadler
+func outputGET(c echo.Context) error{
+    return c.String(http.StatusOK, "WIP!")
+}
+
+// output POST handler
+func outputPOST(c echo.Context) error{
+    return c.String(http.StatusOK, "WIP!")
+}
+
 
 func init() {
 	ValidDB_Name = regexp.MustCompile(`^[a-z][a-z0-9_$()+/-]*$`)
@@ -101,6 +150,13 @@ func main() {
 
 	e.GET("/input", inputGET)
 	e.POST("/input", inputPOST)
+	
+	e.GET("/compute", computeGET)
+	e.POST("/compute", computePOST)
+    
+    e.GET("/output", outputGET)
+    e.POST("/output", outputPOST)
+
 
 	e.Logger.Fatal(e.Start(":8080"))
 }
