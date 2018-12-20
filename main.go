@@ -135,6 +135,11 @@ func computePOST(c echo.Context) error {
 	}
 	program = string(bodyBytes)
 	e.Logger.Debug(program)
+	//Save the program in the database
+	err = localDB.UpdateDB([]byte("program"), []byte("javascript"), bodyBytes)
+	if err != nil {
+		e.Logger.Error(err)
+	}
 	v, err := vm.RunString(program)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err)
@@ -161,7 +166,23 @@ func computePOST(c echo.Context) error {
 
 // output GET hadler
 func outputGET(c echo.Context) error {
-	return c.String(http.StatusOK, "WIP!")
+	localDB := NewBoltDB("", ALL_DBS[0]+".bd")
+	defer localDB.Close()
+	var doc map[string]interface{}
+
+	if localDB.ExistsDoc([]byte("result")) {
+		inputDoc, err := localDB.Read([]byte("result"), []byte("output"))
+		err = json.Unmarshal([]byte(inputDoc), &doc)
+		if err != nil {
+			e.Logger.Error(e)
+		}
+	} else {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Result not found!")
+	}
+
+	e.Logger.Debug(doc)
+
+	return c.JSON(http.StatusOK, doc)
 }
 
 // output POST handler

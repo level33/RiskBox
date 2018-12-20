@@ -137,6 +137,7 @@ func DeleteDB(filepath string, dbname string) error {
 	return os.Remove(filepath + dbname)
 }
 
+//This works only with echo framework
 func (b *BoltDB) ExportFile(filepath string, dbname string, c echo.Context) error {
 	return c.Attachment(filepath+dbname, dbname)
 	/*
