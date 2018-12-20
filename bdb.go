@@ -6,14 +6,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/gob"
 	"encoding/hex"
+	"errors"
 	_ "fmt"
 	"io"
 	"log"
 	"os"
-
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -21,10 +23,25 @@ import (
 )
 
 //Auxiliary function use to ched if a database is in ALL_DBS list
-func Contains(list []string, elem string) bool { 
-        for _, t := range list { if t == elem { return true } } 
-        return false 
-} 
+func Contains(list []string, elem string) bool {
+	for _, t := range list {
+		if t == elem {
+			return true
+		}
+	}
+	return false
+}
+
+//Transform interface{} to []byte
+func GetBytes(key interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(key)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
 
 func GetMD5Hash(text []byte) string {
 	hash := md5.Sum(text)
@@ -76,15 +93,19 @@ func (b *BoltDB) Close() {
 
 func (b *BoltDB) Read(bucket []byte, key []byte) (value []byte, err error) {
 
-	err = b.db.View(func(tx *bolt.Tx) error {
-		bucket_tmp := tx.Bucket(bucket)
-		value = bucket_tmp.Get(key)
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	if b.ExistsDoc(bucket) {
+
+		err = b.db.View(func(tx *bolt.Tx) error {
+			bucket_tmp := tx.Bucket(bucket)
+			value = bucket_tmp.Get(key)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return value, nil
 	}
-	return value, nil
+	return nil, errors.New("Document does not exist!")
 }
 
 func (b *BoltDB) UpdateDB(bucket []byte, key []byte, value []byte) error {
