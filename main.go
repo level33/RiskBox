@@ -1,6 +1,7 @@
 // Main program
 // @author: Dragos STOICA
 // @date: 16.12.2018
+// @version: 0.0.1
 //
 
 package main
@@ -12,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/Jeffail/gabs"
 	"github.com/dop251/goja"
 	"github.com/labstack/echo"
 	"github.com/labstack/gommon/log"
@@ -67,22 +67,15 @@ func inputPOST(c echo.Context) error {
 			e.Logger.Error("Marshal error")
 			return err
 		}
-		e.Logger.Debug(b)
-
-		jsonParsed, err := gabs.ParseJSON(b)
-		if err != nil {
-			e.Logger.Error("Gabs error")
-			return err
-		}
-		e.Logger.Debug(jsonParsed.String())
 
 		newDB.UpdateDB([]byte("payload"), []byte("input"), b)
 
 	} else {
-		//TODO return an error message to the users
+		//return an error message to the users
 		e.Logger.Error(u.AccountName + " malformed database name!")
+		return echo.NewHTTPError(http.StatusInternalServerError, u.AccountName+" malformed database name!")
 	}
-
+	e.Logger.Debug(u.AccountName + " database created and doc: payload created with value from payload.")
 	return c.JSON(http.StatusCreated, u)
 }
 
@@ -90,21 +83,12 @@ func inputPOST(c echo.Context) error {
 func computeGET(c echo.Context) error {
 	localDB := NewBoltDB("", ALL_DBS[0]+".bd")
 	defer localDB.Close()
-	var doc map[string]interface{}
 
-	if localDB.ExistsDoc([]byte("result")) {
-		inputDoc, err := localDB.Read([]byte("result"), []byte("output"))
-		err = json.Unmarshal([]byte(inputDoc), &doc)
-		if err != nil {
-			e.Logger.Error(e)
-		}
-	} else {
+	if !localDB.ExistsDoc([]byte("result")) {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Result not found!")
 	}
 
-	e.Logger.Debug(doc)
-
-	return c.JSON(http.StatusOK, doc)
+	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Result ready!"})
 }
 
 // compute POST handler
@@ -148,12 +132,12 @@ func computePOST(c echo.Context) error {
 	var num interface{}
 	err = vm.ExportTo(v, &num)
 	//Save the result in database before sending the response
+	e.Logger.Debug(num)
 	b, err := json.Marshal(num)
 	if err != nil {
 		e.Logger.Error("Marshal error")
 		return err
 	}
-	e.Logger.Debug(string(b))
 
 	err = localDB.UpdateDB([]byte("result"), []byte("output"), b)
 	if err != nil {

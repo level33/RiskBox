@@ -1,6 +1,7 @@
 // BoltDB helper functions
 // @author: Dragos STOICA
 // @date: 16.12.2018
+// @version: 0.0.1
 //
 
 package main
