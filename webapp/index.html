@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>RiskBox Excel Preprocessor</title>
+		<link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    </head>
+	<body>
+		<input type="file" id="file" name="file" value=""/>
+		<label for="file">... or click here to select a file</label>
+	    <script type="text/javascript" src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+		<script type="text/javascript">
+		
+			var rABS = true; // true: readAsBinaryString ; false: readAsArrayBuffer
+			function handleFile(e) {
+			  var files = e.target.files, f = files[0];
+			  var reader = new FileReader();
+			  reader.onload = function(e) {
+			    var data = e.target.result;
+			    if(!rABS) data = new Uint8Array(data);
+			    var workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
+			
+			    /* DO SOMETHING WITH workbook HERE */
+				//output the sheet names to console
+				console.log("Processing ...");
+				var result = {};
+
+				workbook.SheetNames.forEach(function(element){
+					console.log(element);
+                    var roa = XLSX.utils.sheet_to_json(workbook.Sheets[element]);
+                    if (roa.length)
+                    result[element] = roa;
+                });
+                console.log(JSON.stringify(result, 2, 2));
+			  };
+			  if(rABS) reader.readAsBinaryString(f); else reader.readAsArrayBuffer(f);
+			};
+
+			var _file = document.getElementById('file');				
+			_file.addEventListener('change', handleFile, false); 
+		</script>
+	</body>
+</html>

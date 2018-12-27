@@ -198,6 +198,9 @@ func main() {
 
 	e.Logger.SetLevel(log.DEBUG)
 
+	//The root of static files is webapp
+	e.Static("/", "webapp")
+
 	e.GET("/input", inputGET)
 	e.POST("/input", inputPOST)
 
