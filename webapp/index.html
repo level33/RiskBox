@@ -4,40 +4,292 @@
 		<title>RiskBox Excel Preprocessor</title>
 		<link rel="icon" href="/favicon.ico" type="image/x-icon" />
     	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-    </head>
-	<body>
-		<input type="file" id="file" name="file" value=""/>
-		<label for="file">... or click here to select a file</label>
-	    <script type="text/javascript" src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+		<script type="text/javascript" src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+
 		<script type="text/javascript">
 		
-			var rABS = true; // true: readAsBinaryString ; false: readAsArrayBuffer
-			function handleFile(e) {
-			  var files = e.target.files, f = files[0];
-			  var reader = new FileReader();
-			  reader.onload = function(e) {
-			    var data = e.target.result;
-			    if(!rABS) data = new Uint8Array(data);
-			    var workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
-			
-			    /* DO SOMETHING WITH workbook HERE */
-				//output the sheet names to console
-				console.log("Processing ...");
-				var result = {};
-
-				workbook.SheetNames.forEach(function(element){
-					console.log(element);
-                    var roa = XLSX.utils.sheet_to_json(workbook.Sheets[element]);
-                    if (roa.length)
-                    result[element] = roa;
-                });
-                console.log(JSON.stringify(result, 2, 2));
-			  };
-			  if(rABS) reader.readAsBinaryString(f); else reader.readAsArrayBuffer(f);
+		function showMessage(text){
+			document.getElementById("file_msg").innerHTML = text;
+		}
+		
+		//Send input data to RiskBox
+		function doInput() {
+		  	var xhttp = new XMLHttpRequest();
+			var inputData = {account_name:"fed", payload: result};
+			xhttp.onreadystatechange = function() {
+			   if (this.readyState == 4 && this.status == 201) {
+			     console.log(this.responseText);
+			     showMessage("INPUT data sent successfuly! Send the algorithm now.");
+			   }
 			};
+			xhttp.open("POST", "/input");
+			xhttp.setRequestHeader("Content-Type", "application/json");
+			xhttp.send(JSON.stringify(inputData));
+		}		
+		
+		//Parse EUF worksheet
+		function parseEUF(ws){
+			//the result will be an array of objects
+			var parseResult = [];
+			//console.log("Products: " + result.products.length + " | Risk Types: " + result.risktypes.length);
+			//this block repreats k = size of products
+			var DONE = false;
+			var block = 1;
+			var productCount = 0;
+			
+			while(!DONE){
+			var tmp = {};
+				//A1 B1 contains the property name
+				//A2 B2 the values
+				block++;
+				tmp.product = ws['A'+block].v;
+				tmp.vbw = ws['B'+block].v;
+				block+=2;
+				//C3 D3 property name
+				//C4 ... Cn D4 ... D4 array of values, where n = size of risktypes
+				tmp.riskmatrix = {risk:[], values: []};
+					for(var i = 0; i< result.risktypes.length; i++){
+						tmp.riskmatrix.risk.push(ws['C'+block].v);
+						tmp.riskmatrix.values.push(ws['D'+block].v);
+						block++;
+					}
+				parseResult.push(tmp);
+				productCount++;
+				DONE = productCount>=result.products.length;
+			}
+			return parseResult;
+		}
+		
+		//Parse riskcomponents spreadsheet
+		function parseRC(ws){
+			var parseResult = {layout:[]};
+			//variable structure property : array of strings
+			//column A - risk
+			//column B - component
+			var row = 2;
+			var risk="";
 
+			do{
+				if (ws['A'+row]){
+					risk=ws['A'+row].v;
+					parseResult[risk]=[];
+					parseResult.layout.push(risk);
+					
+				}
+				parseResult[risk].push(ws['B'+row].v);
+				row++;
+			}while(ws['B'+row])
+			return parseResult;
+		}
+		
+		//Parse bestpracticecategories spreadsheet
+		function parseBPC(ws){
+			var parseResult = {layout:[]};
+			//variable structure property : object{ property : array of strings}
+			//column A - category
+			//column B - subcategory
+			//column C - item
+			
+			var row = 2;
+			var category = "", subcategory = "";
+			do{
+				if(ws['A'+row]){
+					category = ws['A'+row].v;
+					parseResult[category]={layout:[]};
+					parseResult.layout.push(category);
+				}
+				if(ws['B'+row]){
+					subcategory = ws['B'+row].v;
+					parseResult[category][subcategory]= [];
+					parseResult[category].layout.push(subcategory);	
+				}
+				parseResult[category][subcategory].push(ws['C'+row].v);
+				row++;
+			}while(ws['C'+row]);
+			
+			
+			return parseResult;	
+		}
+		
+		//Parse Processing Risk spreadsheets
+		function parsePR(ws){
+			var cols = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+			var parseResult = {layout:[]};
+			var block = ws['!ref'].split(":")[1].substr(1)/result.products.length;
+			var lastColumn = ws['!ref'].split(":")[1].substr(0,1);
+			
+			for(var i=0; i<result.products.length; i++){
+				//A2 product
+				//C3 ... lastColumn3 bpc
+				//C4 ... lastColumn4 values
+				//B7 ... B_[block-6] bc
+				//C7 ... lastColumn7 bc_values
+				//C_[block-6] ... lastColumn_[block-6] bc_values
+				var row = i*block;
+				row+=2;
+				var prod = ws['A'+row].v;
+				parseResult["layout"].push(prod);
+				parseResult[prod] = {bpc:[], values:[], layout:[], bc_values:[]};
+				row++;
+				var start = cols.indexOf('C');
+				while(lastColumn != cols.charAt(start)){
+					parseResult[prod]["bpc"].push(ws[cols.charAt(start)+row].v);
+					parseResult[prod]["values"].push(ws[cols.charAt(start)+(row+1)].v);
+					start++;					
+				}
+				parseResult[prod]["bpc"].push(ws[lastColumn+row].v);
+				parseResult[prod]["values"].push(ws[lastColumn+(row+1)].v);
+
+				row+=4;
+				for(var k=row; k<row+block-6; k++){
+					parseResult[prod]["layout"].push(ws['B'+k].v);
+					parseResult[prod]["bc_values"].push([]);
+					var s = cols.indexOf('C');
+					while(lastColumn != cols.charAt(s)){
+						parseResult[prod]["bc_values"][k-row].push(ws[cols.charAt(s)+k].v);
+						s++;
+					}
+					parseResult[prod]["bc_values"][k-row].push(ws[lastColumn+k].v);
+				}
+			}
+			
+			return parseResult;
+		}
+			
+		//Parse product risk spreadsheets
+		function parseProdRisk(ws){
+			var cols = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+			var parseResult = {layout:[], bpc:[], values: [], prod_values: []};
+			var lastRow = ws['!ref'].split(":")[1].substr(1);
+			var lastColumn = ws['!ref'].split(":")[1].substr(0,1);
+			//A2 ... lastRow-3 - product
+			//B2 ... lastColumn prod_values
+			//B_lastRow-1 ... lastColumn_lastRow-1 bpc
+			//B_lastRow ... lastColumn_lastRow values 
+			
+			for(var i=2; i<lastRow-3; i++){
+				parseResult["layout"].push(ws['A'+i].w);
+				parseResult["prod_values"].push([]);
+				var s = cols.indexOf('B');
+				while(lastColumn != cols.charAt(s)){
+					parseResult["prod_values"][i-2].push(ws[cols.charAt(s)+i].v);
+					s++;
+				}
+				parseResult["prod_values"][i-2].push(ws[lastColumn+i].v);
+			}
+			
+			var start = cols.indexOf('B');
+			while(lastColumn != cols.charAt(start)){
+				parseResult["bpc"].push(ws[cols.charAt(start)+(lastRow-1)].v);
+				parseResult["values"].push(ws[cols.charAt(start)+lastRow].v);
+				start++;
+			}
+			parseResult["bpc"].push(ws[lastColumn+(lastRow-1)].v);
+			parseResult["values"].push(ws[lastColumn+lastRow].v);			
+			return parseResult;
+		}
+		
+		var rABS = true; // true: readAsBinaryString ; false: readAsArrayBuffer
+		var workbook;
+		var result = {}; //the input data will be stored here --- send to server
+		var algorithm = ""; //the algorithm will be stored here --- send to server
+
+		function handleFile(e) {
+		  var files = e.target.files, f = files[0];
+		  var reader = new FileReader();
+		  reader.onload = function(e) {
+		    var data = e.target.result;
+		    if(!rABS) data = new Uint8Array(data);
+		    workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
+		
+		    /* DO SOMETHING WITH workbook HERE */
+			//output the sheet names to console
+			console.log("Processing ...");
+
+			workbook.SheetNames.forEach(function(element){
+				//console.log(element);
+				var processedWS = workbook.Sheets[element];
+				switch(element){
+					case "products":
+						result.products = XLSX.utils.sheet_to_json(processedWS,{header:1}).flat();
+					break;
+					case "risktypes":
+						result.risktypes = XLSX.utils.sheet_to_json(processedWS,{header:1}).flat();
+					break;
+					case "euf":
+						result.euf = parseEUF(processedWS);
+					break;
+					case "riskcomponents":
+						result.riskcomponents = parseRC(processedWS);
+					break;
+					case "bestpracticecategories":
+						result.bpc = parseBPC(processedWS);
+					break;
+					case "comp_pr_transactionprocessing":
+						result.transactionprocessing = parsePR(processedWS); 
+					break;
+					case "comp_pr_referencedatamanagement":
+						result.referencedatamanagement = parsePR(processedWS); 
+					break;
+					case "comp_pr_coresystemsmanagement":
+						result.coresystemsmanagemen = parsePR(processedWS); 
+					break;
+					case "comp_tradingmanagement":
+						result["tradingmanagement"] = parseProdRisk(processedWS);
+					break;
+					case "comp_creditmanagement":
+						result["creditmanagement"] = parseProdRisk(processedWS);
+					break;
+					case "comp_liquiditymanagement":
+						result["liquiditymanagement"] = parseProdRisk(processedWS);
+					break;
+					case "comp_interestratemanagement":
+						result["interestratemanagement"] = parseProdRisk(processedWS);
+					break;
+					case "comp_salesmanagement":
+						result["salesmanagement"] = parseProdRisk(processedWS);
+					break;																			
+					default:
+						console.log(element + " unknown speradsheet. Igonred!")
+				}
+                   //var roa = XLSX.utils.sheet_to_json(workbook.Sheets[element]);
+                   //if (roa.length) result[element] = roa;
+               });
+			console.log(result);
+			showMessage("DONE! Proceed to step 2 >>>");
+			
+               //console.log(JSON.stringify(result, 2, 2));
+		  };
+		  if(rABS) reader.readAsBinaryString(f); else reader.readAsArrayBuffer(f);
+		};
+		
+		window.onload = function(){	
 			var _file = document.getElementById('file');				
 			_file.addEventListener('change', handleFile, false); 
-		</script>
+		}
+		</script>		
+		
+    </head>
+	<body>
+			<div id="file_msg">load file and wait for DONE message in this box!</div>
+		<hr/>
+		
+		<h1>Step 1. Select and upload the Excel file containing input data according to template format</h1>
+		<input type="file" id="file" name="file" value=""/>
+		<label for="file">... or click here to select the Excel file</label>
+		
+		<hr/>
+		<h1>Step 2. Check the algorithm/method and click the button bellow</h1>
+		<textarea rows="10" cols="128"></textarea>
+		<br/>
+		<input type="button" onclick="doInput()" value="Send INPUT data"/>
+		<input type="button" onclick="doMethod()" value="Send Algorithm to RiskBox"/>
+		<input type="button" onclick="doRiskBox()" value="Compute"/>
+
+		
+		<hr/>
+		<h1>Step 3. Download Excel file with results</h1>
+		<input type="button" value="Click to download"/>
+
 	</body>
 </html>
