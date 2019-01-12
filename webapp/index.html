@@ -4,7 +4,7 @@
 		<title>RiskBox Excel Preprocessor</title>
 		<link rel="icon" href="/favicon.ico" type="image/x-icon" />
     	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-		<script type="text/javascript" src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+		<script type="text/javascript" src="js/xlsx.full.min.js"></script>
 
 		<script type="text/javascript">
 		
@@ -70,6 +70,25 @@
 			return result;
 		}
 		
+		//Get the result from server
+		function getResultRiskBox(){
+			var xhttp = new XMLHttpRequest();
+
+			xhttp.onreadystatechange = function() {
+			  if (this.readyState == 4) {
+				__output = JSON.parse(this.responseText);
+				console.log(__output);
+
+				getResults();
+				
+			     showMessage("Got response from RiskBox. Excel file downloading ...");
+			  }
+			};
+			xhttp.open("GET", "/output", true);
+			xhttp.send();
+		}
+		
+		
 		//Get results from RiskBox and download them as Excel file
 		function getResults(){
 			var workbook = XLSX.utils.book_new();
@@ -92,13 +111,15 @@
 			ws = XLSX.utils.json_to_sheet([{A:"Product Summary"}], {header:["A"], skipHeader:true});
 			XLSX.utils.sheet_add_json(ws,[{A:"Products", B:"Inherent Risk", C:"Risk Mitigation Index", D: "Residual Risk"}], {skipHeader: true, origin: "A2"});
 			
-			var sh = [];
-			var h = __output["data"]["riskcomponents"]["layout"].reduce(function(accumulator, currentValue, currentIndex, array){
-				accumulator = accumulator.concat(__output["data"]["riskcomponents"][currentValue].map(function(val){return [val+"_ASA", val+"_MSA"]})).flat();
+			var sh = [], gh = ["TOTAL", ""];
+			var h = __output["data"]["riskcomponents"]["layout"].reduce(function(accumulator, currentValue, currentIndex, array){				
+				accumulator = accumulator.concat(__output["data"]["riskcomponents"][currentValue].map(function(elm){return ["ASA", "MSA"]})).flat();
+				gh = gh.concat(__output["data"]["riskcomponents"][currentValue].map(function(elm){return [elm, " "]})).flat();				
 				sh = sh.concat(__output["data"]["riskcomponents"][currentValue]);
 				return accumulator;
-			},["TOTAL_ASA", "TOTAL_MSA"]);
+			},["ASA", "MSA"]);
 			
+			XLSX.utils.sheet_add_json(ws,a2r(gh), {skipHeader: true, origin: "E1"});
 			XLSX.utils.sheet_add_json(ws,a2r(h), {skipHeader: true, origin: "E2"});
 			XLSX.utils.sheet_add_json(ws,a2c(__output["data"]["products"]), {skipHeader: true, origin: "A3"});
 			var r = 3;
@@ -122,8 +143,36 @@
 			})
 
 			XLSX.utils.book_append_sheet(workbook, ws, "Product Summary");
+
 			
-			
+			ws = XLSX.utils.json_to_sheet([{A:"Best Practice Summary"}], {header:["A"], skipHeader:true});
+			XLSX.utils.sheet_add_json(ws,[{A:"Best Parctice Categories"}], {skipHeader: true, origin: "A2"});
+
+			var tmp_sublayout = ["IR" , "RMI", "RR", "ASA", "MSA"];
+			var tmp_layout = __output["data"]["riskcomponents"]["layout"].reduce(function(accumulator, currentValue, currentIndex, array) {
+				accumulator = accumulator.concat(__output["data"]["riskcomponents"][currentValue].map(function(val){tmp_sublayout.push("ASA");tmp_sublayout.push("MSA");return [val, ""]})).flat();
+				return accumulator;
+			}, [" " , " ", " ", "TOTAL", ""]);
+			XLSX.utils.sheet_add_json(ws,a2r(tmp_layout), {skipHeader: true, origin: "B1"});
+			XLSX.utils.sheet_add_json(ws,a2r(tmp_sublayout), {skipHeader: true, origin: "B2"});
+			var r = 3;
+			__output["data"]["bpc"]["layout"].forEach(function(cat){
+				XLSX.utils.sheet_add_json(ws,[{A: cat}], {skipHeader: true, origin: "A"+r});
+				r++;
+				__output["data"]["bpc"][cat]["layout"].forEach(function(subcat){
+					XLSX.utils.sheet_add_json(ws,[{A: subcat}], {skipHeader: true, origin: "A"+r});
+					r++;
+					__output["data"]["bpc"][cat][subcat].forEach(function(bpc_val){
+						XLSX.utils.sheet_add_json(ws,[{A: bpc_val}], {skipHeader: true, origin: "A"+r});
+						XLSX.utils.sheet_add_json(ws,a2r(__output["result"]["BPS"][cat][subcat][bpc_val]), {skipHeader: true, origin: "B"+r});
+						r++;
+					})
+				});
+			})
+
+
+			XLSX.utils.book_append_sheet(workbook, ws, "Best Practice Summary");
+
 			
 			XLSX.writeFile(workbook, 'out.xlsx');	
 		}
@@ -141,16 +190,280 @@
 			function arraySUM(accumulator, currentValue, currentIndex, array) {
 				return accumulator + currentValue;
 			}
-			//Setup layout
-			var assembly = {PS:{}, IR:{}};
-			//Product Summary
+			
+			//Compute BCS data based on category, subcategory, business component
+			//THIS IS HIGHLY HARDCODED
+			function computeBCS(cat, subcat, bpc_val){
+				var result = [], t_asa = 0, t_msa = 0;
+				var comp_v = ["tp", "rdm", "csm", "tm", "cm", "lm", "irm", "sm"],
+				    lookup_col = ["transactionprocessing", "referencedatamanagement",
+					              "coresystemsmanagement", "tradingmanagement",
+								  "creditmanagement", "liquiditymanagement",
+								  "interestratemanagement", "salesmanagement"];
+				//result contains pairs of ASA and MSA stating with TOTAL
+				if (cat == "Generic"){
+					if (subcat == "General"){
+						comp_v.forEach(function(element, index){
+							var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+							if( w != -1){
+								result.push(assembly[element]["col_values"]["ASA"][w]);
+								result.push(assembly[element]["col_values"]["MSA"][w]);
+								t_asa += assembly[element]["col_values"]["ASA"][w];
+								t_msa += assembly[element]["col_values"]["MSA"][w]; 
+							}else{
+								result.push(0); result.push(0);
+							}
+						});
+					}
+				};
+				
+				if (cat == "Technical"){
+					if (subcat == "Reference Data Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 1){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});													
+					}
+					if (subcat == "Core Systems Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 2){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});																		
+					}
+					if (subcat == "Trading Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 3){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});													
+					}
+					if (subcat == "Credit Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 4){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});																			
+					}
+					if (subcat == "Liquidity Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 5){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});																		
+					}
+					if (subcat == "Sales Management (Product)"){
+						comp_v.forEach(function(element, index){
+							if(index == 7){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});							
+					}
+					if (subcat == "Interest Rate Management"){
+						comp_v.forEach(function(element, index){
+							if(index == 6){
+								var w = __input[lookup_col[index]]["bpc"].indexOf(bpc_val);
+								if( w != -1){
+									result.push(assembly[element]["col_values"]["ASA"][w]);
+									result.push(assembly[element]["col_values"]["MSA"][w]);
+									t_asa += assembly[element]["col_values"]["ASA"][w];
+									t_msa += assembly[element]["col_values"]["MSA"][w]; 
+								}else{
+									result.push(0); result.push(0);
+								}
+							}else{
+								result.push(0); result.push(0);
+							}
+						});																			
+					}																														
+				};
+				
+				//insert total asa and msa in front of result
+				result.unshift(t_msa);
+				result.unshift(t_asa);
+				return result;
+			}
+			
+			
+			//Compute each bpc compute MSA, ASA, and RMI aggregated case
+			function computeMAS_ASA_RMI_RR_product_aggregated(arr, riskLabel, assemblyLabel){
+				var result = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}};
+				//Get IR for each product, compute MAS, ASA, RMI and RR
+				var sumbpc = arr["values"].reduce(arraySUM, 0);
+				arr["layout"].forEach(function(element, idx){
+					var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf(riskLabel)];
+					var _msa = _ir*sumbpc*100;
+					var _asa = arr["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
+					  return accumulator + currentValue*arr["prod_values"][idx][currentIndex];
+					},0);
+					_asa*=_ir;
+					var _rmi = 100.0*_asa/_msa;
+					var _rr = (100.0-_rmi)/100.0*_ir;
+					result.IR.push(_ir);
+					result.MSA.push(_msa);
+					result.ASA.push(_asa);
+					result.RMI.push(_rmi);
+					result.RR.push(_rr);
+					assembly.PS[element][assemblyLabel] = {MSA: _msa, ASA: _asa};	
+					assembly.PS[element]["TOTAL_ASA"]+=_asa;
+					assembly.PS[element]["TOTAL_MSA"]+=_msa;						
+				});
+				//For each BPC compute MSA, ASA and RMI
+				var sumir = result.IR.reduce(arraySUM, 0);
+				arr["values"].forEach(function(element, idx){
+					var _msa = element*sumir*100;
+					var _asa = 0;
+					arr["prod_values"].forEach(function(elm,id){
+						_asa+= elm[idx]*result.IR[id];
+					});
+					_asa*=element;
+					var _rmi = 100.0*_asa/_msa;
+					result.col_values.MSA.push(_msa);
+					result.col_values.ASA.push(_asa);
+					result.col_values.RMI.push(_rmi);
+				});
+			
+			
+				return result;
+			}
+			
+			//Compute each bpc compute MSA, ASA, and RMI detailed case
+			function computeMSA_ASA_RMI_detailed(arr, riskLabel){
+				var result = {col_values:{MSA:[], ASA:[], RMI:[]}};
+				
+				arr["values"].forEach(function(element, index){
+					var _msa = 0, _asa = 0;
+					
+					arr["layout"].forEach(function(prd){
+						var _ir = assembly.IR[prd]["IR"][assembly.IR[prd]["risk"].indexOf(riskLabel)];
+						arr[prd]["bc_values"].forEach(function(bcv){
+							_asa += bcv[index]*element*_ir;
+							var partial_sp = bcv.reduce(function(accumulator, currentValue, currentIndex, array){
+								return accumulator + currentValue*arr["values"][currentIndex];
+							},0);
+							if (partial_sp > 0){
+								_msa += 100.0*_ir*element;
+							}
+						});
+					});
+					result.col_values.MSA.push(_msa);
+					result.col_values.ASA.push(_asa);
+					result.col_values.RMI.push(100.0*_asa/_msa);
+				});
+				
+				return result;
+			};
+			
+			//Compute MAS, ASA, RMI, and RR for each product
+			function computeMAS_ASA_RMI_RR_product_detailed(arr, riskLabel, assemblyLabel){
+				var result = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}};
+				
+				var sumbpc = arr["values"].reduce(arraySUM, 0);
+				arr["layout"].forEach(function(element, idx){
+					//For all those 3 subrisks use Processing IR
+					var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf(riskLabel)];
+					var _msa = 0, _asa = 0;
+					//Compute the aggregated sum for each bc >> asa, if asa > 0 then compute msa
+					arr[element]["bc_values"].forEach(function(bcv){
+						var partial_sp = bcv.reduce(function(accumulator, currentValue, currentIndex, array){
+							return accumulator + currentValue*arr["values"][currentIndex];
+						},0);
+						_asa += partial_sp;
+						if(partial_sp > 0){
+							_msa += _ir*sumbpc*100.0;
+						}
+					});
+					_asa *= _ir;
+					var _rmi = 100.0*_asa/_msa;
+					var _rr = (100.0 - _rmi)/100.0*_ir;
+					result.IR.push(_ir);
+					result.MSA.push(_msa);
+					result.ASA.push(_asa);
+					result.RMI.push(_rmi);
+					result.RR.push(_rr);
+					assembly.PS[element][assemblyLabel] = {MSA: _msa, ASA: _asa};	
+					assembly.PS[element]["TOTAL_ASA"]+=_asa;
+					assembly.PS[element]["TOTAL_MSA"]+=_msa;	
+				});
+				//For each bpc compute MSA, ASA, and RMI
+				result.col_values = computeMSA_ASA_RMI_detailed(arr, riskLabel).col_values;
+				return result;
+			}
+			
+			//Setup layout Product Summary, Inherent Risk, Best Practice Summary
+			var assembly = {PS:{}, IR:{}, BPS:{}};
+
 			//Compute Inherent Risk - IR
+			var grandTotalIR = 0;
+
 			__input["euf"].forEach(function(element){
 				var tmpIR = element.riskmatrix.values.map(function(val) {
 				  return val * element.vbw;
 				});
 				var ceuf = element.riskmatrix.values.reduce(arraySUM,0);
 				var totalIR = tmpIR.reduce(arraySUM, 0);
+				grandTotalIR += totalIR;
 				assembly.IR[element.product]= {vbw: element.vbw, risk: element.riskmatrix.risk, values: element.riskmatrix.values, 
 				           ceuf: ceuf, totalIR: totalIR, IR: tmpIR};
 				assembly.PS[element.product] = {IR: totalIR, RMI:0, RR:0, TOTAL_ASA:0, TOTAL_MSA:0};				
@@ -158,305 +471,55 @@
 
 			//Compute RMI, RR, ASA, MSA for detailed forms
 			//transactionprocessing, referencedatamanagement, coresystemsmanagement
-			var tp = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}}, 
-			    rdm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}},
-				csm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}};
-
 			//Get IR for each product, compute MAS, ASA, RMI, and RR
-			var sumbpc = __input["transactionprocessing"]["values"].reduce(arraySUM, 0);
-			__input["transactionprocessing"]["layout"].forEach(function(element, idx){
-				//For all those 3 subrisks use Processing IR
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Processing")];
-				var _msa = 0, _asa = 0;
-				//Compute the aggregated sum for each bc >> asa, if asa > 0 then compute msa
-				__input["transactionprocessing"][element]["bc_values"].forEach(function(bcv){
-					var partial_sp = bcv.reduce(function(accumulator, currentValue, currentIndex, array){
-						return accumulator + currentValue*__input["transactionprocessing"]["values"][currentIndex];
-					},0);
-					_asa += partial_sp;
-					if(partial_sp != 0){
-						_msa += _ir*sumbpc*100.0;
-					}
-				});
-				_asa *= _ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0 - _rmi)/100.0*_ir;
-				tp.IR.push(_ir);
-				tp.MSA.push(_msa);
-				tp.ASA.push(_asa);
-				tp.RMI.push(_rmi);
-				tp.RR.push(_rr);
-				assembly.PS[element]["Transaction Processing"] = {MSA: _msa, ASA: _asa};	
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;	
-			});
-			//For each bpc compute MSA, ASA, and RMI
-			//TODO
-
-
-			//Get IR for each product, compute MAS, ASA, RMI, and RR
-			var sumbpc = __input["referencedatamanagement"]["values"].reduce(arraySUM, 0);
-			__input["referencedatamanagement"]["layout"].forEach(function(element, idx){
-				//For all those 3 subrisks use Processing IR
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Processing")];
-				var _msa = 0, _asa = 0;
-				//Compute the aggregated sum for each bc >> asa, if asa > 0 then compute msa
-				__input["referencedatamanagement"][element]["bc_values"].forEach(function(bcv){
-					var partial_sp = bcv.reduce(function(accumulator, currentValue, currentIndex, array){
-						return accumulator + currentValue*__input["referencedatamanagement"]["values"][currentIndex];
-					},0);
-					_asa += partial_sp;
-					if(partial_sp != 0){
-						_msa += _ir*sumbpc*100.0;
-					}
-				});
-				_asa *= _ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0 - _rmi)/100.0*_ir;
-				rdm.IR.push(_ir);
-				rdm.MSA.push(_msa);
-				rdm.ASA.push(_asa);
-				rdm.RMI.push(_rmi);
-				rdm.RR.push(_rr);
-				assembly.PS[element]["Reference Data Management"] = {MSA: _msa, ASA: _asa};	
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;	
-			});
-			//For each bpc compute MSA, ASA, and RMI
-			//TODO
-
-
-			//Get IR for each product, compute MAS, ASA, RMI, and RR
-			var sumbpc = __input["coresystemsmanagement"]["values"].reduce(arraySUM, 0);
-			__input["coresystemsmanagement"]["layout"].forEach(function(element, idx){
-				//For all those 3 subrisks use Processing IR
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Processing")];
-				var _msa = 0, _asa = 0;
-				//Compute the aggregated sum for each bc >> asa, if asa > 0 then compute msa
-				__input["coresystemsmanagement"][element]["bc_values"].forEach(function(bcv){
-					var partial_sp = bcv.reduce(function(accumulator, currentValue, currentIndex, array){
-						return accumulator + currentValue*__input["coresystemsmanagement"]["values"][currentIndex];
-					},0);
-					_asa += partial_sp;
-					if(partial_sp != 0){
-						_msa += _ir*sumbpc*100.0;
-					}
-				});
-				_asa *= _ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0 - _rmi)/100.0*_ir;
-				csm.IR.push(_ir);
-				csm.MSA.push(_msa);
-				csm.ASA.push(_asa);
-				csm.RMI.push(_rmi);
-				csm.RR.push(_rr);
-				assembly.PS[element]["Core Systems Management"] = {MSA: _msa, ASA: _asa};	
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;	
-			});
-			//For each bpc compute MSA, ASA, and RMI
-			//TODO
-
-
-			assembly.tp = tp;
-			assembly.rdm = rdm;
-			assembly.csm = csm;
+			assembly.tp = computeMAS_ASA_RMI_RR_product_detailed(__input["transactionprocessing"], "Processing", "Transaction Processing");
+			assembly.rdm = computeMAS_ASA_RMI_RR_product_detailed(__input["referencedatamanagement"], "Processing", "Reference Data Management");
+			assembly.csm = computeMAS_ASA_RMI_RR_product_detailed(__input["coresystemsmanagement"], "Processing", "Core Systems Management");
 			
 			//Compute RMI, RR, ASA, MSA for direct forms
 			//tradingmanagement, creditmanagement, liquiditymanagement, interestratemanagement, salesmanagement
-			var tm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}}, 
-			    cm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}}, 
-			    lm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}}, 
-				irm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}}, 
-				sm = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}} ;
 			
 			//Get IR for each product, compute MAS, ASA, RMI and RR
-			var sumbpc = __input["tradingmanagement"]["values"].reduce(arraySUM, 0);
-			__input["tradingmanagement"]["layout"].forEach(function(element, idx){
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Trading")];
-				var _msa = _ir*sumbpc*100;
-				var _asa = __input["tradingmanagement"]["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
-				  return accumulator + currentValue*__input["tradingmanagement"]["prod_values"][idx][currentIndex];
-				},0);
-				_asa*=_ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0-_rmi)/100.0*_ir;
-				tm.IR.push(_ir);
-				tm.MSA.push(_msa);
-				tm.ASA.push(_asa);
-				tm.RMI.push(_rmi);
-				tm.RR.push(_rr);
-				assembly.PS[element]["Trading Management"] = {MSA: _msa, ASA: _asa};	
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;						
-			});
-			//For each BPC compute MSA, ASA and RMI
-			var sumir = tm.IR.reduce(arraySUM, 0);
-			__input["tradingmanagement"]["values"].forEach(function(element, idx){
-				var _msa = element*sumir*100;
-				var _asa = 0;
-				__input["tradingmanagement"]["prod_values"].forEach(function(elm,id){
-					_asa+= elm[idx]*tm.IR[id];
-				});
-				_asa*=element;
-				var _rmi = 100.0*_asa/_msa;
-				tm.col_values.MSA.push(_msa);
-				tm.col_values.ASA.push(_asa);
-				tm.col_values.RMI.push(_rmi);
-			});
-						
-			//Get IR for each product, compute MAS, ASA, RMI and RR
-			sumbpc = __input["creditmanagement"]["values"].reduce(arraySUM, 0);
-			__input["creditmanagement"]["layout"].forEach(function(element, idx){
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Lending")];
-				var _msa = _ir*sumbpc*100;
-				var _asa = __input["creditmanagement"]["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
-				  return accumulator + currentValue*__input["creditmanagement"]["prod_values"][idx][currentIndex];
-				},0);
-				_asa*=_ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0-_rmi)/100.0*_ir;
-				cm.IR.push(_ir);
-				cm.MSA.push(_msa);
-				cm.ASA.push(_asa);
-				cm.RMI.push(_rmi);
-				cm.RR.push(_rr);
-				assembly.PS[element]["Credit Management"] = {MSA: _msa, ASA: _asa};
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;								
-			});
-			//For each BPC compute MSA, ASA and RMI
-			sumir = cm.IR.reduce(arraySUM, 0);
-			__input["creditmanagement"]["values"].forEach(function(element, idx){
-				var _msa = element*sumir*100;
-				var _asa = 0;
-				__input["creditmanagement"]["prod_values"].forEach(function(elm,id){
-					_asa+= elm[idx]*cm.IR[id];
-				});
-				_asa*=element;
-				var _rmi = 100.0*_asa/_msa;
-				cm.col_values.MSA.push(_msa);
-				cm.col_values.ASA.push(_asa);
-				cm.col_values.RMI.push(_rmi);
-			});					
-			
-			//Get IR for each product, compute MAS, ASA, RMI and RR
-			sumbpc = __input["liquiditymanagement"]["values"].reduce(arraySUM, 0);
-			__input["liquiditymanagement"]["layout"].forEach(function(element, idx){
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Funding")];
-				var _msa = _ir*sumbpc*100;
-				var _asa = __input["liquiditymanagement"]["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
-				  return accumulator + currentValue*__input["liquiditymanagement"]["prod_values"][idx][currentIndex];
-				},0);
-				_asa*=_ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0-_rmi)/100.0*_ir;
-				lm.IR.push(_ir);
-				lm.MSA.push(_msa);
-				lm.ASA.push(_asa);
-				lm.RMI.push(_rmi);
-				lm.RR.push(_rr);
-				assembly.PS[element]["Liquidity Management"] = {MSA: _msa, ASA: _asa};
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;								
-			});
-			//For each BPC compute MSA, ASA and RMI
-			sumir = lm.IR.reduce(arraySUM, 0);
-			__input["liquiditymanagement"]["values"].forEach(function(element, idx){
-				var _msa = element*sumir*100;
-				var _asa = 0;
-				__input["liquiditymanagement"]["prod_values"].forEach(function(elm,id){
-					_asa+= elm[idx]*lm.IR[id];
-				});
-				_asa*=element;
-				var _rmi = 100.0*_asa/_msa;
-				lm.col_values.MSA.push(_msa);
-				lm.col_values.ASA.push(_asa);
-				lm.col_values.RMI.push(_rmi);
-			});			
-			
-			//Get IR for each product, compute MAS, ASA, RMI and RR
-			sumbpc = __input["interestratemanagement"]["values"].reduce(arraySUM, 0);
-			__input["interestratemanagement"]["layout"].forEach(function(element, idx){
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Interest")];
-				var _msa = _ir*sumbpc*100;
-				var _asa = __input["interestratemanagement"]["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
-				  return accumulator + currentValue*__input["interestratemanagement"]["prod_values"][idx][currentIndex];
-				},0);
-				_asa*=_ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0-_rmi)/100.0*_ir;
-				irm.IR.push(_ir);
-				irm.MSA.push(_msa);
-				irm.ASA.push(_asa);
-				irm.RMI.push(_rmi);
-				irm.RR.push(_rr);
-				assembly.PS[element]["Interest Rate Management"] = {MSA: _msa, ASA: _asa};
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;								
-			});
-			//For each BPC compute MSA, ASA and RMI
-			sumir = irm.IR.reduce(arraySUM, 0);
-			__input["interestratemanagement"]["values"].forEach(function(element, idx){
-				var _msa = element*sumir*100;
-				var _asa = 0;
-				__input["interestratemanagement"]["prod_values"].forEach(function(elm,id){
-					_asa+= elm[idx]*irm.IR[id];
-				});
-				_asa*=element;
-				var _rmi = 100.0*_asa/_msa;
-				irm.col_values.MSA.push(_msa);
-				irm.col_values.ASA.push(_asa);
-				irm.col_values.RMI.push(_rmi);
-			});	
-							
-			//Get IR for each product, compute MAS, ASA, RMI and RR
-			sumbpc = __input["salesmanagement"]["values"].reduce(arraySUM, 0);
-			__input["salesmanagement"]["layout"].forEach(function(element, idx){
-				var _ir = assembly.IR[element]["IR"][assembly.IR[element]["risk"].indexOf("Selling")];
-				var _msa = _ir*sumbpc*100;
-				var _asa = __input["salesmanagement"]["values"].reduce(function(accumulator, currentValue, currentIndex, array) {
-				  return accumulator + currentValue*__input["salesmanagement"]["prod_values"][idx][currentIndex];
-				},0);
-				_asa*=_ir;
-				var _rmi = 100.0*_asa/_msa;
-				var _rr = (100.0-_rmi)/100.0*_ir;
-				sm.IR.push(_ir);
-				sm.MSA.push(_msa);
-				sm.ASA.push(_asa);
-				sm.RMI.push(_rmi);
-				sm.RR.push(_rr);
-				assembly.PS[element]["Sales Management"] = {MSA: _msa, ASA: _asa};
-				assembly.PS[element]["TOTAL_ASA"]+=_asa;
-				assembly.PS[element]["TOTAL_MSA"]+=_msa;								
-			});
-			//For each BPC compute MSA, ASA and RMI
-			sumir = sm.IR.reduce(arraySUM, 0);
-			__input["salesmanagement"]["values"].forEach(function(element, idx){
-				var _msa = element*sumir*100;
-				var _asa = 0;
-				__input["salesmanagement"]["prod_values"].forEach(function(elm,id){
-					_asa+= elm[idx]*sm.IR[id];
-				});
-				_asa*=element;
-				var _rmi = 100.0*_asa/_msa;
-				sm.col_values.MSA.push(_msa);
-				sm.col_values.ASA.push(_asa);
-				sm.col_values.RMI.push(_rmi);
-			});							
-			
-			assembly.tm = tm;
-			assembly.cm = cm;
-			assembly.lm = lm;
-			assembly.irm = irm;
-			assembly.sm = sm;
-			
+			assembly.tm = computeMAS_ASA_RMI_RR_product_aggregated(__input["tradingmanagement"], "Trading",  "Trading Management");
+			assembly.cm = computeMAS_ASA_RMI_RR_product_aggregated(__input["creditmanagement"], "Lending",  "Credit Management");
+			assembly.lm = computeMAS_ASA_RMI_RR_product_aggregated(__input["liquiditymanagement"], "Funding",  "Liquidity Management");
+			assembly.irm = computeMAS_ASA_RMI_RR_product_aggregated(__input["interestratemanagement"], "Interest",  "Interest Rate Management");
+			assembly.sm = computeMAS_ASA_RMI_RR_product_aggregated(__input["salesmanagement"], "Selling",  "Sales Management");				
+										
 			//compute RMI si RR for PS
 			__input["products"].forEach(function(element){
 				assembly.PS[element]["RMI"]=100.0*assembly.PS[element]["TOTAL_ASA"]/assembly.PS[element]["TOTAL_MSA"];
 				assembly.PS[element]["RR"]=(100.0-assembly.PS[element]["RMI"])/100.0*assembly.PS[element]["IR"];
 			});
 			
+			//compute BPS per risk type
+
+			//This is constructed by hand and is higly dependent on the position of bpc for each product
+			//A general solution should be found to uniquely define and identify each bpc for each product
+			var grandTotalMSA = 0;
+			__input["bpc"]["layout"].forEach(function(cat){
+				assembly.BPS[cat] = {};
+				__input["bpc"][cat]["layout"].forEach(function(subcat){
+					assembly.BPS[cat][subcat] = {};
+					__input["bpc"][cat][subcat].forEach(function(bpc_val){
+						assembly.BPS[cat][subcat][bpc_val] = computeBCS(cat, subcat, bpc_val);
+						grandTotalMSA += assembly.BPS[cat][subcat][bpc_val][1];
+					})
+				})
+			})
+			//Computer IR, RMI and RR for bpc
+			for (var c in assembly.BPS){
+				for (var sc in assembly.BPS[c]){
+					for (var bpc_arr in assembly.BPS[c][sc]){
+						var _ir = grandTotalIR/grandTotalMSA*assembly.BPS[c][sc][bpc_arr][1];
+							var _rmi = 100.0*assembly.BPS[c][sc][bpc_arr][0]/assembly.BPS[c][sc][bpc_arr][1];
+							var _rr = (_ir/100.0)*(100.0-_rmi);	
+							assembly.BPS[c][sc][bpc_arr].unshift(_rr);
+							assembly.BPS[c][sc][bpc_arr].unshift(_rmi);
+							assembly.BPS[c][sc][bpc_arr].unshift(_ir);
+					}
+				}
+			}			
 			__output = { data: __input, result: assembly};
 				
 			// .: EOA :.
@@ -634,6 +697,7 @@
 		var workbook;
 		var result = {}; //the input data will be stored here --- send to server
 		var algorithm = ""; //the algorithm will be stored here --- send to server
+		var __output ={}; //global variable for server result processing
 
 		function handleFile(e) {
 		  var files = e.target.files, f = files[0];
@@ -643,7 +707,6 @@
 		    if(!rABS) data = new Uint8Array(data);
 		    workbook = XLSX.read(data, {type: rABS ? 'binary' : 'array'});
 		
-		    /* DO SOMETHING WITH workbook HERE */
 			//output the sheet names to console
 			console.log("Processing ...");
 
@@ -731,7 +794,7 @@
 		
 		<hr/>
 		<h1>Step 3. Download Excel file with results</h1>
-		<input type="button" onclick="getResults()" value="Click to download"/>
+		<input type="button" onclick="getResultRiskBox()" value="Click to download"/>
 
 	</body>
 </html>
