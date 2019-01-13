@@ -344,8 +344,7 @@
 				result.unshift(t_asa);
 				return result;
 			}
-			
-			
+				
 			//Compute each bpc compute MSA, ASA, and RMI aggregated case
 			function computeMAS_ASA_RMI_RR_product_aggregated(arr, riskLabel, assemblyLabel){
 				var result = {IR:[], MSA:[], ASA:[], RMI:[], RR:[], col_values:{ASA:[], MSA:[], RMI:[]}};
@@ -451,8 +450,8 @@
 				return result;
 			}
 			
-			//Setup layout Product Summary, Inherent Risk, Best Practice Summary
-			var assembly = {PS:{}, IR:{}, BPS:{}};
+			//Setup layout Product Summary, Inherent Risk, Best Practice Summary, Business Component Summary
+			var assembly = {PS:{}, IR:{}, BPS:{}, BCS:{}};
 
 			//Compute Inherent Risk - IR
 			var grandTotalIR = 0;
@@ -519,7 +518,12 @@
 							assembly.BPS[c][sc][bpc_arr].unshift(_ir);
 					}
 				}
-			}			
+			}	
+			
+			//Compute IR, RMI, RR, ASA and MSA per Business Component
+			
+			
+					
 			__output = { data: __input, result: assembly};
 				
 			// .: EOA :.
@@ -604,6 +608,35 @@
 					parseResult[category].layout.push(subcategory);	
 				}
 				parseResult[category][subcategory].push(ws['C'+row].v);
+				row++;
+			}while(ws['C'+row]);
+			
+			
+			return parseResult;	
+		}
+
+		//Parse business component spreadsheet
+		function parseBC(ws){
+			var parseResult = {layout:[]};
+			//variable structure property : object{ property : array of strings}
+			//column A - risk
+			//column B - category
+			//column C - business component
+			
+			var row = 2;
+			var category = "", risk = "";
+			do{
+				if(ws['A'+row]){
+					risk = ws['A'+row].v;
+					parseResult[risk]={layout:[]};
+					parseResult.layout.push(risk);
+				}
+				if(ws['B'+row]){
+					category = ws['B'+row].v;
+					parseResult[risk][category]= [];
+					parseResult[risk].layout.push(category);	
+				}
+				parseResult[risk][category].push(ws['C'+row].v);
 				row++;
 			}while(ws['C'+row]);
 			
@@ -729,6 +762,9 @@
 					case "bestpracticecategories":
 						result.bpc = parseBPC(processedWS);
 					break;
+					case "businesscomponents":
+						result.bc = parseBC(processedWS);
+					break;					
 					case "comp_pr_transactionprocessing":
 						result.transactionprocessing = parsePR(processedWS); 
 					break;
